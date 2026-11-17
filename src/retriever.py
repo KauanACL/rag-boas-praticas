@@ -21,7 +21,12 @@ def carregar_chunks(caminho: Path = CHUNKS) -> list[dict]:
 
 class Buscador:
     def __init__(self, modelo: str = MODELO_BASE, chunks: list[dict] | None = None):
-        self.modelo = SentenceTransformer(modelo)
+        if modelo.endswith(".onnx"):
+            from onnx_encoder import CodificadorOnnx
+
+            self.modelo = CodificadorOnnx(modelo)
+        else:
+            self.modelo = SentenceTransformer(modelo)
         self.chunks = chunks if chunks is not None else carregar_chunks()
         vetores = self._codificar([PREFIXO_TRECHO + c["texto"] for c in self.chunks])
         # Vetores normalizados: produto interno = similaridade de cosseno.

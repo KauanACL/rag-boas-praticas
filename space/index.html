@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Boas Práticas em Alimentação</title>
+<style>
+  :root {
+    --bg: #fafaf7; --fg: #1d1d1b; --muted: #66665f; --card: #ffffff;
+    --borda: #e3e2dc; --acento: #2f6b3a; --acento-fg: #ffffff; --cita: #f1f0ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161614; --fg: #ecebe6; --muted: #a3a29b; --card: #1f1f1c;
+      --borda: #34332f; --acento: #7cc28a; --acento-fg: #10200f; --cita: #262622;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.6rem; margin: 0 0 8px; }
+  p.sub { color: var(--muted); margin: 0 0 24px; }
+  form { display: flex; gap: 8px; flex-wrap: wrap; }
+  input[type=text] { flex: 1 1 260px; padding: 12px; font: inherit; color: var(--fg);
+                     background: var(--card); border: 1px solid var(--borda); border-radius: 8px; }
+  select, button { font: inherit; padding: 12px; border-radius: 8px; border: 1px solid var(--borda);
+                   background: var(--card); color: var(--fg); }
+  button { background: var(--acento); color: var(--acento-fg); border-color: var(--acento);
+           font-weight: 600; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: wait; }
+  .exemplos { margin: 12px 0 24px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .exemplos button { background: transparent; color: var(--fg); border-color: var(--borda);
+                     font-weight: 400; padding: 6px 10px; font-size: .88rem; }
+  #status { color: var(--muted); font-size: .9rem; min-height: 1.4em; }
+  article { background: var(--card); border: 1px solid var(--borda); border-radius: 10px;
+            padding: 16px; margin-top: 14px; }
+  article h2 { font-size: 1rem; margin: 0 0 4px; }
+  .meta { color: var(--muted); font-size: .82rem; margin-bottom: 10px; }
+  .meta a { color: var(--acento); }
+  blockquote { margin: 0; padding: 10px 12px; background: var(--cita); border-radius: 6px;
+               font-size: .93rem; }
+  footer { margin-top: 40px; color: var(--muted); font-size: .82rem; }
+  footer a { color: var(--acento); }
+</style>
+</head>
+<body>
+<main>
+  <h1>Boas Práticas em Serviços de Alimentação</h1>
+  <p class="sub">Busca semântica na <strong>RDC 216/2004</strong> e na <strong>Cartilha de Boas Práticas</strong>
+    da Anvisa. Mostra os trechos mais relevantes com a fonte e a página (cartilha) ou o item (RDC).
+    Não substitui a leitura da norma nem a orientação da vigilância sanitária.</p>
+
+  <form id="form">
+    <input id="pergunta" type="text" placeholder="Ex.: como higienizar verduras?" autocomplete="off" required>
+    <select id="k" aria-label="Número de trechos">
+      <option value="1">1 trecho</option><option value="3" selected>3 trechos</option><option value="5">5 trechos</option>
+    </select>
+    <button id="buscar" type="submit" disabled>Buscar</button>
+  </form>
+  <div class="exemplos" id="exemplos"></div>
+  <div id="status">Carregando…</div>
+  <section id="resultados"></section>
+
+  <footer>
+    Modelo: <a href="https://huggingface.co/KauanACL/e5-small-boas-praticas">KauanACL/e5-small-boas-praticas</a>
+    (ONNX int8, roda no seu navegador) ·
+    Código e avaliação: <a href="https://github.com/KauanACL/rag-boas-praticas">GitHub</a>
+  </footer>
+</main>
+
+<script type="module">
+import { pipeline, env } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+
+const MODELO = "KauanACL/e5-small-boas-praticas";
+const EXEMPLOS = [
+  "Qual a temperatura para manter a comida quente no bufê?",
+  "De quanto em quanto tempo devo limpar a caixa d'água?",
+  "O cozinheiro pode usar anel ou relógio?",
+  "Como descongelar carne com segurança?",
+  "Por quanto tempo guardar os registros dos POP?",
+];
+
+// ?local=1 usa ./modelo-local/ (para testar antes de publicar o modelo).
+const local = new URLSearchParams(location.search).has("local");
+if (local) {
+  env.localModelPath = "./modelo-local/";
+  env.allowLocalModels = true;
+  env.allowRemoteModels = false;
+}
+
+const $ = (id) => document.getElementById(id);
+const escapar = (s) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+
+let extrator, chunks;
+
+async function iniciar() {
+  $("status").textContent = "Carregando o modelo (~118 MB na primeira visita; depois fica em cache)…";
+  [extrator, chunks] = await Promise.all([
+    pipeline("feature-extraction", local ? "e5" : MODELO, { dtype: "q8" }),
+    fetch("chunks.json").then((r) => r.json()),
+  ]);
+  $("status").textContent = `Pronto: ${chunks.length} trechos indexados.`;
+  $("buscar").disabled = false;
+}
+
+async function buscar(pergunta, k) {
+  $("buscar").disabled = true;
+  $("status").textContent = "Buscando…";
+  const saida = await extrator("query: " + pergunta, { pooling: "mean", normalize: true });
+  const q = saida.data;
+  // Vetores normalizados: produto interno = cosseno (equivale ao IndexFlatIP do FAISS).
+  const ranking = chunks
+    .map((c) => ({ c, score: c.vetor.reduce((s, x, i) => s + x * q[i], 0) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, k);
+
+  $("resultados").innerHTML = ranking.map(({ c, score }, i) => `
+    <article>
+      <h2>${i + 1}. ${escapar(c.titulo)} — ${escapar(c.local)}</h2>
+      <div class="meta">similaridade ${score.toFixed(3)} · <code>${c.id}</code> ·
+        <a href="${c.url}" target="_blank" rel="noopener">fonte</a></div>
+      <blockquote>${escapar(c.texto)}</blockquote>
+    </article>`).join("");
+  $("status").textContent = "";
+  $("buscar").disabled = false;
+}
+
+for (const ex of EXEMPLOS) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.textContent = ex;
+  b.onclick = () => { $("pergunta").value = ex; if (extrator) buscar(ex, +$("k").value); };
+  $("exemplos").append(b);
+}
+
+$("form").onsubmit = (e) => {
+  e.preventDefault();
+  const pergunta = $("pergunta").value.trim();
+  if (pergunta && extrator) buscar(pergunta, +$("k").value);
+};
+
+iniciar().catch((erro) => {
+  console.error(erro);
+  $("status").textContent = "Não foi possível carregar o modelo: " + erro.message;
+});
+</script>
+</body>
+</html>

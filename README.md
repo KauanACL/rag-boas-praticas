@@ -2,7 +2,7 @@
 
 Assistente de busca em português sobre as regras sanitárias para restaurantes, lanchonetes, padarias e outros serviços de alimentação. A base são documentos oficiais da Anvisa. O foco do projeto é **medir a qualidade da busca** e tentar melhorá-la com um **modelo de embedding fine-tunado**.
 
-- Demo: [Space no Hugging Face](https://huggingface.co/spaces/KauanACL/rag-boas-praticas)
+- Demo: [Space no Hugging Face](https://huggingface.co/spaces/KauanACL/rag-boas-praticas) (estático: o modelo roda no seu navegador)
 - Modelo: [KauanACL/e5-small-boas-praticas](https://huggingface.co/KauanACL/e5-small-boas-praticas)
 - Dataset: [KauanACL/boas-praticas-anvisa-qa](https://huggingface.co/datasets/KauanACL/boas-praticas-anvisa-qa)
 
@@ -22,7 +22,8 @@ flowchart LR
     C --> G[retriever.py<br/>e5-small + FAISS]
     E --> G
     G --> F
-    G --> H[app/app.py<br/>Gradio: trechos + fonte + página/item]
+    G --> H[app/app.py<br/>Gradio local: trechos + fonte + página/item]
+    E -->|export_onnx.py<br/>ONNX int8| I[space/<br/>HTML + transformers.js<br/>Space estático]
 ```
 
 **Fontes** (só oficiais):
@@ -48,6 +49,19 @@ flowchart LR
 | `e5-small-boas-praticas` (fine-tunado) | **0,631** | **0,905** | **0,744** |
 
 Valores de `eval/resultados.json`, gerados por `python src/evaluate.py [modelo]`.
+
+**Versão que roda na demo.** O Space é estático, porque o Hugging Face passou a cobrar por Spaces Gradio. Por isso o modelo é exportado para ONNX e quantizado em int8 (118 MB em vez de 470 MB), para rodar no navegador.
+
+| Versão do modelo fine-tunado | recall@1 | recall@5 | MRR@10 |
+|---|---|---|---|
+| ONNX fp32 (onnxruntime, Python) | 0,631 | 0,905 | 0,744 |
+| ONNX int8 (onnxruntime, Python) | 0,583 | 0,893 | 0,714 |
+| ONNX int8 no navegador (transformers.js 4.3.2, o que o Space usa) | 0,595 | 0,881 | 0,721 |
+
+- O fp32 reproduz exatamente o PyTorch, o que valida a exportação.
+- **A quantização int8 consome a maior parte do ganho em recall@1**: a demo fica entre o baseline e o modelo fine-tunado completo.
+- Testei também a quantização por canal (recall@1 0,619, recall@5 0,869) e não a adotei, porque escolher a variante olhando o conjunto de avaliação seria ajustar ao teste.
+- A pequena diferença entre o int8 no Python e no navegador deve vir dos kernels int8 do onnxruntime-web, que diferem dos do onnxruntime em Python, mas não verifiquei isso. O número do navegador foi medido rodando as 84 perguntas no Chrome.
 
 **Leitura honesta do ganho:** em recall@1, o fine-tuning corrigiu 10 perguntas e piorou 5, um ganho líquido de 5 em 84. O teste de McNemar exato sobre essas 15 discordâncias dá **p = 0,30**, então **o ganho não é estatisticamente significativo** com esse tamanho de avaliação. A direção é positiva nas três métricas, mas pode ser ruído. Também não medi a variância entre seeds: houve um único treino, com seed 42.
 
@@ -79,10 +93,16 @@ python src/split.py         # separa treino/avaliação
 python src/evaluate.py      # avalia o baseline
 python src/finetune.py 3    # fine-tuning (~2 min no M3), salva em models/
 python src/evaluate.py models/e5-small-boas-praticas
-python app/app.py           # demo em http://127.0.0.1:7860
+python app/app.py           # demo Gradio local em http://127.0.0.1:7860
+
+# Space estático
+pip install onnxruntime
+python src/export_onnx.py   # models/onnx/ (fp32 + int8)
+python src/evaluate.py models/onnx/onnx/model_quantized.onnx
+python src/build_space.py   # space/chunks.json com embeddings pré-calculados
 ```
 
-Para usar o modelo publicado no app: `MODELO=KauanACL/e5-small-boas-praticas python app/app.py`.
+Para usar o modelo publicado no app Gradio: `MODELO=KauanACL/e5-small-boas-praticas python app/app.py`.
 
 ## Estrutura
 
@@ -93,7 +113,12 @@ src/split.py      divisão treino/avaliação por blocos
 src/retriever.py  embeddings + FAISS
 src/evaluate.py   recall@1, recall@5, MRR@10
 src/finetune.py   fine-tuning com sentence-transformers
-app/app.py        demo Gradio
+src/export_onnx.py    exportação ONNX + quantização int8
+src/onnx_encoder.py   codificador ONNX (mesmo pooling do transformers.js)
+src/build_space.py    embeddings dos chunks para o Space
+src/publish_hub.py    publicação no Hugging Face
+app/app.py        demo Gradio (local)
+space/            Space estático: index.html + chunks.json
 eval/             perguntas de avaliação e resultados
 data/processed/   chunks, split e pares de treino
 ```
@@ -105,4 +130,5 @@ data/processed/   chunks, split e pares de treino
 - **Vazamento parcial:** chunks vizinhos compartilham 40 palavras. A divisão em blocos limita isso às bordas dos blocos de avaliação, mas não elimina.
 - **Corpus pequeno e de 2004:** são 2 documentos e 66 chunks. A RDC 216 foi complementada depois por outras normas (por exemplo, a RDC 52/2014), que não estão no corpus. O app não substitui a norma vigente nem a vigilância sanitária local.
 - **Extração do PDF:** o pypdf às vezes coloca o título de uma seção depois do parágrafo dela, pela diagramação em caixas da cartilha.
-- **Sem geração de resposta:** o app só recupera e mostra os trechos com a fonte. A geração por LLM, com citação e recusa quando não há resposta, ficou fora do escopo desta versão.
+- **Sem geração de resposta:** o app só recupera e mostra os trechos com a fonte. A geração por LLM, com citação e recusa quando não há resposta, ficou de fora porque exigiria uma API paga.
+- **Demo quantizada:** o Space usa a versão int8, que é mais fraca que o modelo completo em recall@1 (veja a tabela acima). A primeira visita baixa ~118 MB.

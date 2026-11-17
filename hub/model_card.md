@@ -52,6 +52,21 @@ São 84 perguntas sobre os 21 chunks de avaliação, com busca sobre todos os 66
 
 Em recall@1, 10 perguntas passaram a acertar e 5 passaram a errar. O teste de McNemar exato dá **p = 0,30**: a melhora **não é estatisticamente significativa** com esse tamanho de avaliação. Também não medi a variância entre seeds, porque houve um único treino.
 
+### Versão ONNX int8 (`onnx/model_quantized.onnx`)
+
+É a versão que roda no navegador, via transformers.js, na [demo](https://huggingface.co/spaces/KauanACL/rag-boas-praticas). Ela é menor, mas mais fraca em recall@1:
+
+| Versão | recall@1 | recall@5 | MRR@10 |
+|---|---|---|---|
+| ONNX int8 (onnxruntime, Python) | 0,583 | 0,893 | 0,714 |
+| ONNX int8 no navegador (transformers.js 4.3.2) | 0,595 | 0,881 | 0,721 |
+
+```js
+import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers@4.3.2";
+const extrator = await pipeline("feature-extraction", "KauanACL/e5-small-boas-praticas", { dtype: "q8" });
+const vetor = await extrator("query: Como descongelar carne?", { pooling: "mean", normalize: true });
+```
+
 ## Limitações
 
 - O domínio é muito estreito: 2 documentos e 66 chunks. Não espere ganho fora de boas práticas em alimentação, e o modelo pode ter perdido qualidade em outros domínios, o que não foi medido.

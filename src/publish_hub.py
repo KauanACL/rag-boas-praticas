@@ -3,7 +3,7 @@
 Usa o login feito com `hf auth login`; nenhum token passa por este script.
 
 Uso:
-    python src/publish_hub.py modelo|dataset|space
+    python src/publish_hub.py modelo|onnx|dataset|space
 """
 import sys
 from pathlib import Path
@@ -34,6 +34,14 @@ def modelo():
     publicar(MODELO, "model", arquivos, "Modelo fine-tunado + model card")
 
 
+def onnx():
+    # Versão int8 para o transformers.js (Space estático), no mesmo repositório do modelo.
+    publicar(MODELO, "model", {
+        "onnx/model_quantized.onnx": RAIZ / "models" / "onnx" / "onnx" / "model_quantized.onnx",
+        "README.md": HUB / "model_card.md",
+    }, "ONNX int8 para transformers.js")
+
+
 def dataset():
     proc = RAIZ / "data" / "processed"
     publicar(DATASET, "dataset", {
@@ -45,17 +53,13 @@ def dataset():
 
 
 def space():
-    # A variável vem antes do código, para o primeiro build já usar o modelo fine-tunado.
-    api.create_repo(SPACE, repo_type="space", space_sdk="gradio", exist_ok=True)
-    api.add_space_variable(SPACE, "MODELO", MODELO)
+    # Space estático (grátis): o modelo roda no navegador via transformers.js.
     publicar(SPACE, "space", {
         "README.md": HUB / "space_readme.md",
-        "requirements.txt": HUB / "space_requirements.txt",
-        "app/app.py": RAIZ / "app" / "app.py",
-        "src/retriever.py": RAIZ / "src" / "retriever.py",
-        "data/processed/chunks.jsonl": RAIZ / "data" / "processed" / "chunks.jsonl",
-    }, "Demo Gradio", space_sdk="gradio")
+        "index.html": RAIZ / "space" / "index.html",
+        "chunks.json": RAIZ / "space" / "chunks.json",
+    }, "Demo estática (transformers.js)", space_sdk="static")
 
 
 if __name__ == "__main__":
-    {"modelo": modelo, "dataset": dataset, "space": space}[sys.argv[1]]()
+    {"modelo": modelo, "onnx": onnx, "dataset": dataset, "space": space}[sys.argv[1]]()
